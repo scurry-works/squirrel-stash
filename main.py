@@ -316,7 +316,7 @@ async def on_match(bot: Client, interaction: Interaction):
             matching_suit = all_one_suit(pair)
 
             if matching_suit:
-                points *= 3 # EASTER EGG: TRIPLE if all one suit!
+                points *= 3
             p.score += points 
             await p.save(conn)
         else:
@@ -402,7 +402,7 @@ async def on_select_match(bot: Client, interaction: Interaction):
         matching_suit = all_one_suit(pair)
 
         if matching_suit:
-            points *= 3 # EASTER EGG: TRIPLE if all one suit!
+            points *= 3
 
         p.score += points 
 
@@ -750,7 +750,7 @@ async def on_stash(bot: Client, interaction: Interaction):
         suit = all_one_suit(p.hand)
 
         if suit:
-            score = 500 # EASTER EGG: x5 if all one suit!
+            score = 500
         else:
             score = 100 # STASH 21 value
 
@@ -840,41 +840,34 @@ async def on_restart(bot: Client, interaction: Interaction):
         )
     )
 
-
-def wrap_help_field(name: str, values: list[str]):
-    return EmbedField('{acorn} ' + name, 
-        '\n'.join(['{space}{bullet}' + v for v in values])
-    )
+wrap_help_field = lambda name, values: EmbedField('{acorn} ' + name, '\n'.join(['{space}{bullet}' + v for v in values]))
 
 GAME_HELP = {
-    0: wrap_help_field('Gameplay', 
-        [
+    0: wrap_help_field('Gameplay', [
             "**GOAL**: Accumulate the highest score!",
             "Add to your hand by selecting from the given choices.",
             "Game ends when you run out of hearts."
         ]),
-    1: wrap_help_field('Stashing',
-        [
+    1: wrap_help_field('Stashing', [
             "Stash when the sum of your hand is exactly **21** (worth 100 points).",
-            "Or stash matching pairs of the same rank (worth *twice* the matching card's value)."
+            "Or stash matching pairs of the same rank (worth *twice* the matching card's value).",
+            "If matching a pair of the same suit, the match score is **tripled** (3×).",
+            "If stashing 21 with all one suit (flush), you earn **500 points** instead of 100 (5×)."
         ]),
-    2: wrap_help_field('Busting',
-        [
+    2: wrap_help_field('Busting', [
             "You hand is busted when its sum exceeds 21.",
             "Lose 1 heart for each bust.",
             "Hearts can be found to restore hearts."
         ]),
-    3: wrap_help_field('Face Cards',
-        [
+    3: wrap_help_field('Face Cards', [
             "Face cards are Ace (A), Bookie (B), Pirate (P), and Wizard (W).",
             "Ace is worth 1 point in hand.",
             "The Bookie, Pirate, and Wizard are all worth 10 points in hand.",
-            "**Bookie**: Replace a card with a card of the Bookie's choosing. If your resulting hand is a bust: lose both the bookie and card, otherwise stash bookie (worth 20 points) and keep the card.",
-            "**Pirate**: Steal a random card from a random player in the same guild. If there is nothing to steal, the pirate will make a random draw. \n"
-            "**Wizard**: Discard one of your cards and the Wizard itself for the value of the Wizard + double the rank's value."
+            "**Bookie**: Replace a card with a new draw. On success: stash Bookie (+20 pts) and keep the card. On bust: lose both.",
+            "**Pirate**: Steal a random card from a random player. If no targets available, draws a card instead.",
+            "**Wizard**: Discard a card + Wizard to immediately score `(card value ×2) +10` points."
         ]),
-    4: wrap_help_field('Support',
-        [
+    4: wrap_help_field('Support', [
             "Need more help or looking to report a bug? Join the [support server](https://discord.gg/D4SdHxcujM)!"
         ])
 }
