@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BETA_TOKEN")
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 APP_ID = 1386436781330923753
 GUILD_ID = 905167903224123473
@@ -10,7 +10,7 @@ GUILD_ID = 905167903224123473
 from scurrypy import (
     Client,
     Interaction, InteractionEvent, UserModel,
-    MessagePart, Attachment,
+    MessagePart,
     EmbedPart, EmbedField, EmbedImage, EmbedFooter,
     StringSelect, SelectOption
 )
@@ -123,12 +123,8 @@ async def on_start(bot: Client, interaction: Interaction):
 
     embed = EmbedPart(
         title=f'Welcome, {event.member.nick or event.member.user.username}!',
-        image=EmbedImage('attachment://welcome.gif')
+        image=EmbedImage('https://raw.githubusercontent.com/scurry-works/squirrel-stash/refs/heads/main/assets/welcome.gif')
     )
-
-    attachments = [
-        Attachment('assets/welcome.gif', 'welcome!')
-    ]
 
     import uuid
 
@@ -139,8 +135,7 @@ async def on_start(bot: Client, interaction: Interaction):
     await interaction.respond(
         MessagePart(
             embeds=[embed],
-            components=[row],
-            attachments=attachments
+            components=[row]
         )
     )
 
