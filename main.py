@@ -29,7 +29,7 @@ commands = CommandsAddon(client, APP_ID, False)
 components = ComponentsAddon(client)
 bot_emojis = BotEmojisCacheAddon(client, APP_ID)
 
-from game import PostgresDB, Card, Player, OPTIONS_SIZE, MAX_HEALTH, STANDARD_SUITS, STANDARD_RANKS
+from game import PostgresDB, Card, Player, OPTIONS_SIZE, MAX_HEALTH, STANDARD_SUITS, STANDARD_RANKS, MAX_HAND
 db = PostgresDB(client, 'furmissile', 'squirrels', DB_PASSWORD)
 
 
@@ -39,11 +39,25 @@ def sum_cards(cards: list[Card]):
     return reduce(lambda x, y: x + y, [c.value for c in cards], 0)
 
 def all_one_suit(cards: list[Card]):
-    return len(set([c.suit for c in cards])) == 1
+    return cards[0].emoji_name if len(set([c.suit for c in cards])) == 1 else None
 
 def format_custom_id(command: str, user_id: int, session_id: str, *args):
     return '_'.join([command, str(user_id), session_id] + [f"{n}" for n in args])
 
+def sort_cards(cards: list[Card]):
+    counts = {} # dict of card str -> n
+
+    for i in [c.to_str() for c in cards]: # dicts require hashable type (like str)
+        counts[i] = counts.setdefault(i, 0) +1
+
+    sorted_counts = sorted(counts.items(), key=lambda item: item[1], reverse=True) # sort by n
+
+    sorted_hand = []
+
+    for v, n in sorted_counts:
+        sorted_hand.extend([Card.to_card(v)] *n)
+
+    return sorted_hand
 
 # --- Common Message Formats ---
 def build_util_buttons(p: Player):
@@ -204,6 +218,11 @@ async def on_select(bot: Client, interaction: Interaction):
         await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
         await conn.close()
         return
+        
+    if len(p.hand) >= MAX_HAND:
+        await interaction.respond("Woah, nelly! Clear some cards before adding more!", ephemeral=True)
+        await conn.close()
+        return
 
     throw_error = False
 
@@ -232,6 +251,8 @@ async def on_select(bot: Client, interaction: Interaction):
             new_options[random.randint(0, OPTIONS_SIZE -1)] = Card('HP', '+1')
 
         p.options = new_options
+
+        p.hand = sort_cards(p.hand)
 
         await p.save(conn)
     except Exception as e:
@@ -283,6 +304,7 @@ async def on_match(bot: Client, interaction: Interaction):
     create_select_menu = False
     points = 0
     throw_error = False
+    matching_suit = None
 
     try:
         matches = p.matches() # len can only be 1 or greater (0 is filtered by disabling this interaction)
@@ -291,8 +313,10 @@ async def on_match(bot: Client, interaction: Interaction):
             only_match = list(matches.keys())[0]
             pair = p.pop_match(only_match)
             points = 2 * Card(None, only_match).value # make popped rank a card for the value prop
-            if all_one_suit(pair):
-                points *= 2 # EASTER EGG: double if all one suit!
+            matching_suit = all_one_suit(pair)
+
+            if matching_suit:
+                points *= 3 # EASTER EGG: TRIPLE if all one suit!
             p.score += points 
             await p.save(conn)
         else:
@@ -310,6 +334,10 @@ async def on_match(bot: Client, interaction: Interaction):
         return
     
     embed = build_game_embed(event.member.user, p, points)
+
+    if matching_suit:
+        suit_emoji = bot_emojis.get_emoji(matching_suit).mention
+        embed.description = f"{suit_emoji} *Match Bonus!* {suit_emoji}"
     
     if create_select_menu:
         select_menu = A.row([
@@ -365,12 +393,17 @@ async def on_select_match(bot: Client, interaction: Interaction):
         return
     
     throw_error = False
+    matching_suit = None
 
     try:
-        pair = p.pop_match(event.data.values[0])
+        pair: list[Card] = p.pop_match(event.data.values[0])
         points = 2 * Card(None, event.data.values[0]).value # make popped rank a card for the value prop
-        if all_one_suit(pair):
-            points *= 2 # EASTER EGG: double if all one suit!
+
+        matching_suit = all_one_suit(pair)
+
+        if matching_suit:
+            points *= 3 # EASTER EGG: TRIPLE if all one suit!
+
         p.score += points 
 
         await p.save(conn)
@@ -385,6 +418,10 @@ async def on_select_match(bot: Client, interaction: Interaction):
         return
 
     embed = build_game_embed(event.member.user, p, points)
+
+    if matching_suit:
+        suit_emoji = bot_emojis.get_emoji(matching_suit).mention
+        embed.description = f"{suit_emoji} *Match Bonus!* {suit_emoji}"
 
     row = build_player_options(p)
 
@@ -470,16 +507,17 @@ async def on_use_bookie(bot: Client, interaction: Interaction):
     add_pts = 0
 
     try:
-        p.pop_rank(event.data.values[0])
         card_select = Card.random()
 
         if not sum_cards(p.hand + [card_select]) > 21:
             bookie_success = True
             add_pts = 20
+            # remove original + add new IF success
+            p.pop_rank(event.data.values[0])
             p.hand.append(card_select)
-
-        p.score += add_pts
-        p.pop_rank('B')
+            p.score += add_pts
+            
+        p.pop_rank('B')  # Bookie is consumed either way
 
         await p.save(conn)
     except Exception as e:
@@ -706,10 +744,13 @@ async def on_stash(bot: Client, interaction: Interaction):
     score = 0
 
     throw_error = False
+    suit = None
     
     try:
-        if all_one_suit(p.hand):
-            score = 200 # EASTER EGG: double if all one suit!
+        suit = all_one_suit(p.hand)
+
+        if suit:
+            score = 500 # EASTER EGG: x5 if all one suit!
         else:
             score = 100 # STASH 21 value
 
@@ -729,6 +770,10 @@ async def on_stash(bot: Client, interaction: Interaction):
         return
     
     embed = build_game_embed(event.member.user, p, score)
+
+    if suit:
+        suit_emoji = bot_emojis.get_emoji(suit).mention
+        embed.description = f"{suit_emoji} *Stash Bonus!* {suit_emoji}"
 
     row = build_player_options(p)
 

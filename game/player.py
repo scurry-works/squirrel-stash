@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from .card import Card
 
 MAX_HEALTH = 5
+MAX_HAND = 15
 OPTIONS_SIZE = 3
 
 """
