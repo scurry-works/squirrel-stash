@@ -64,7 +64,7 @@ def build_util_buttons(p: Player):
     has_matches = any(p.matches())
     has_b = p.has_rank('B')
     has_p = p.has_rank('P')
-    has_w = p.has_rank('W')
+    has_w = p.has_rank('W') and any(c.rank != 'W' for c in p.hand)
     has_21 = sum_cards(p.hand) == 21
 
     return A.row([
