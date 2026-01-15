@@ -9,10 +9,6 @@ class Cards:
     @staticmethod
     def all_one_suit(cards: list[Card]):
         return cards[0].emoji_name if len(set([c.suit for c in cards])) == 1 else None
-
-    @staticmethod
-    def has_rank(cards: list[Card], card: Card):
-        return card.rank in [c.rank for c in cards]
     
     @staticmethod
     def get_next_card(cards: list[Card], card: Card):

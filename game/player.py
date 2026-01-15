@@ -3,8 +3,7 @@ import random
 from dataclasses import dataclass, field
 
 from .card import Card, RANKS, SUITS, FACES
-from .cards import Cards
-from .select_event import SelectEvent
+from .card_event import CardEvent
 
 MAX_HEALTH = 3
 OPTIONS_SIZE = 3
@@ -68,32 +67,17 @@ class Player:
             self.session_id, self.hp, self.score, self.highscore, new_hand, new_options, self.guild_id, self.user_id)
 
     def add_card(self, card: Card):
-        new_hand = self.hand + [card]
+        e = CardEvent()
 
-        e = SelectEvent(
-            is_match=Cards.has_rank(self.hand, card), 
-            is_stash=Cards.sum_cards(new_hand) == 21
-        )
+        self.hand = e.check_21(self.hand, card)
 
-        if e.is_stash:
-            e.points = 100
+        # only check for match if stash didnt occur
+        if not e.is_stash:
+            self.hand = e.check_match(self.hand, card)
 
-            if Cards.all_one_suit(new_hand):
-                e.points = 500
-                e.suit = card.emoji_name
+            self.hand = e.check_21(self.hand, None)
 
-            self.hand.clear()
-
-        elif e.is_match:
-            matching_card = Cards.get_next_card(self.hand, card)
-
-            e.points = 2 * card.value
-            if Cards.all_one_suit([matching_card, card]):
-                e.points *= 3
-                e.suit = card.emoji_name
-
-            self.hand.remove(matching_card)
-        else:
+        if not e.is_match and not e.is_stash:
             self.hand.append(card)
         
         self.score += e.points

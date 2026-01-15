@@ -28,7 +28,7 @@ commands = CommandsAddon(client, APP_ID, False)
 components = ComponentsAddon(client)
 bot_emojis = BotEmojisCacheAddon(client, APP_ID)
 
-from game import PostgresDB,  Cards, Card, Player, SelectEvent, OPTIONS_SIZE, MAX_HEALTH, RANKS, SUITS
+from game import PostgresDB,  Cards, Card, Player, CardEvent, OPTIONS_SIZE, MAX_HEALTH, RANKS, SUITS
 db = PostgresDB(client, 'furmissile', 'squirrels', DB_PASSWORD)
 
 
@@ -81,6 +81,19 @@ def get_suit_emoji(suit: str):
 
 def format_card(card: Card):
     return f"{get_suit_emoji(card.emoji_name)} **{card.rank}**"
+
+def append_event(e: CardEvent):
+    description = ""
+
+    if e.is_stash and e.stash_suit:
+        card_suit = get_suit_emoji(e.stash_suit)
+        description += f"{card_suit} *Stash Bonus!* {card_suit} \n"
+
+    if e.is_match and e.match_suit:
+        card_suit = get_suit_emoji(e.match_suit)
+        description += f"{card_suit} *Match Bonus!* {card_suit} \n"
+
+    return description
 
 # --- Bot Interactions ---
 @commands.slash_command('play', 'Begin or resume your game!', guild_ids=GUILD_ID)
@@ -192,13 +205,8 @@ async def on_select(bot: Client, interaction: Interaction):
             e_one = p.add_card(card_one)
             e_two = p.add_card(card_two)
 
-            if e_one.suit:
-                card_suit = get_suit_emoji(e_one.suit)
-                description += f"{card_suit} *" + ("Match Bonus!" if e_one.is_match else "Stash Bonus!") + f"* {card_suit} \n"
-            
-            if e_two.suit:
-                card_suit = get_suit_emoji(e_two.suit)
-                description += f"{card_suit} *" + ("Match Bonus!" if e_two.is_match else "Stash Bonus!") + f"* {card_suit} \n"
+            description += append_event(e_one)
+            description += append_event(e_two)
 
             add_pts = e_one.points + e_two.points
 
@@ -220,29 +228,31 @@ async def on_select(bot: Client, interaction: Interaction):
 
             e = p.add_card(card_select)
 
-            if e.suit:
-                card_suit = get_suit_emoji(e.suit)
-                description += f"{card_suit} *" + ("Match Bonus!" if e.is_match else "Stash Bonus!") + f"* {card_suit} \n"
+            description += append_event(e)
 
             add_pts = e.points
 
         elif select_card.rank == 'W':
             highest_card = Cards.get_highest_card(p.hand)
-            add_pts = 2 * highest_card.value
             p.hand.remove(highest_card)
 
+            e = CardEvent(points=2 * highest_card.value)
+            p.hand = e.check_21(p.hand, highest_card)
+
+            description += append_event(e)
+            
+            add_pts = e.points
         else: 
             e = p.add_card(select_card)
 
-            if e.suit:
-                card_suit = get_suit_emoji(e.suit)
-                description += f"{card_suit} *" + ("Match Bonus!" if e.is_match else "Stash Bonus!") + f"* {card_suit} \n"
-
-            if Cards.sum_cards(p.hand) > 21:
-                p.hp -= 1
-                description += f"*Busted!* \n-**1** {bot_emojis.get_emoji('broken_heart').mention} Heart"
+            description += append_event(e)
 
             add_pts = e.points
+
+        if Cards.sum_cards(p.hand) > 21:
+            p.hp -= 1
+            description += f"*Busted!* \n-**1** {bot_emojis.get_emoji('broken_heart').mention} Heart"
+
         p.new_options()
 
         await p.save(conn)
@@ -295,8 +305,9 @@ async def on_restart(bot: Client, interaction: Interaction):
             event.member.user.id, 
             p.session_id, 
             highscore = p.score if p.score > p.highscore else p.highscore,
-            options=[Card.random() for _ in range(OPTIONS_SIZE)]
         )
+
+        reset_p.new_options()
 
         await reset_p.save(conn)
     except Exception as e:
@@ -332,7 +343,7 @@ GAME_HELP = {
             "Stashing occurs automatically when there's a match to be made or your hand sums to 21.",
             "Hitting 21 is worth 100 points.",
             "Pairs of the same rank is worth *twice* the matching card's value.",
-            "If matching a pair of the same suit, the match score is **tripled** (3×).",
+            "If matching a pair of the same suit, the match score is **doubled** (2×).",
             "If stashing 21 with all one suit, you earn **500 points** instead of 100 (5×)."
         ]),
     2: wrap_help_field('Busting', [
@@ -345,7 +356,7 @@ GAME_HELP = {
             "The Bookie, Pirate, and Wizard are all executed immediately upon selecting and do NOT go in hand.",
             "**Bookie (B)**: Draw 2 random cards.",
             "**Pirate (P)**: Steal a random card from a random player. If no targets available, draws a card instead.",
-            "**Wizard (W)**: Discard the card of highest value + Wizard worth `(card value ×2) +10` points."
+            "**Wizard (W)**: Stash the card of highest value + Wizard worth `(card value ×2) +10` points."
         ]),
     4: wrap_help_field('Support', [
             "Need more help or looking to report a bug? Join the [support server](https://discord.gg/D4SdHxcujM)!"
