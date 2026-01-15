@@ -12,10 +12,12 @@ class CardEvent:
     is_stash: bool = False
 
     def check_21(self, cards: list[Card], card: Card):
-        self.is_stash = Cards.sum_cards(cards + [card] if card else cards) == 21
+        p_cards = cards + [card] if card else cards
+
+        self.is_stash = Cards.sum_cards(p_cards) == 21
 
         if self.is_stash:
-            self.stash_suit = Cards.all_one_suit(cards)
+            self.stash_suit = Cards.all_one_suit(p_cards)
             self.points += 500 if self.stash_suit else 100
 
             cards.clear()
