@@ -336,24 +336,25 @@ wrap_help_field = lambda name, values: EmbedField('{acorn} ' + name, '\n'.join([
 GAME_HELP = {
     0: wrap_help_field('Gameplay', [
             "**GOAL**: Accumulate the highest score!",
-            "Add to your hand by selecting from the given choices.",
+            "Add cards to your hand by selecting from the given choices.",
+            "All cards are worth their rank in hand. Ace is worth **1** point.",
             "Game ends when you run out of hearts."
         ]),
     1: wrap_help_field('Stashing', [
-            "Stashing occurs automatically when there's a match to be made or your hand sums to 21.",
             "Hitting 21 is worth 100 points.",
             "Pairs of the same rank are worth the value of both cards.",
             "If matching a pair of the same suit, the match score is **doubled** (2×).",
-            "If stashing 21 with all one suit, you earn **500 points** instead of 100 (5×)."
+            "If stashing 21 of all one suit, you earn **500 points** instead of 100 (5×).",
+            "Making matches and hitting 21 are automatically done with 21 being checked first."
         ]),
     2: wrap_help_field('Busting', [
-            "You hand is busted when its sum exceeds 21.",
+            "You hand is busted when its sum exceeds 21 (sum is shown in parentheses).",
             "Lose 1 heart for each bust.",
-            "Hearts can be found to restore hearts."
+            "Hearts can be found in choices to restore hearts."
         ]),
     3: wrap_help_field('Face Cards', [
-            "**Ace (A)** is worth 1 point in hand.",
-            "The Bookie, Pirate, and Wizard are all executed immediately upon selecting and do NOT go in hand.",
+            "Face cards include the Bookie (B), Pirate (P), and Wizard (W).",
+            "Face cards are executed immediately upon selecting and do NOT go in hand.",
             "**Bookie (B)**: Draw 2 random cards.",
             "**Pirate (P)**: Steal a random card from a random player. If no targets available, draws a card instead.",
             "**Wizard (W)**: Stash the card of highest value for double (2×) its value."
