@@ -342,7 +342,7 @@ GAME_HELP = {
     1: wrap_help_field('Stashing', [
             "Stashing occurs automatically when there's a match to be made or your hand sums to 21.",
             "Hitting 21 is worth 100 points.",
-            "Pairs of the same rank is worth *twice* the matching card's value.",
+            "Pairs of the same rank are worth the value of both cards.",
             "If matching a pair of the same suit, the match score is **doubled** (2×).",
             "If stashing 21 with all one suit, you earn **500 points** instead of 100 (5×)."
         ]),
@@ -356,7 +356,7 @@ GAME_HELP = {
             "The Bookie, Pirate, and Wizard are all executed immediately upon selecting and do NOT go in hand.",
             "**Bookie (B)**: Draw 2 random cards.",
             "**Pirate (P)**: Steal a random card from a random player. If no targets available, draws a card instead.",
-            "**Wizard (W)**: Stash the card of highest value + Wizard worth `(card value ×2) +10` points."
+            "**Wizard (W)**: Stash the card of highest value for double (2×) its value."
         ]),
     4: wrap_help_field('Support', [
             "Need more help or looking to report a bug? Join the [support server](https://discord.gg/D4SdHxcujM)!"
