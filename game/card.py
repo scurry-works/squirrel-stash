@@ -1,7 +1,9 @@
+import random
 from dataclasses import dataclass
 
-STANDARD_RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'B', 'P', 'W']
-STANDARD_SUITS = ['GL', 'SP', 'DG', 'LA']
+RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10']
+FACES = ['B', 'P', 'W']
+SUITS = ['GL', 'SP', 'DG', 'LA']
 
 @dataclass
 class Card:
@@ -19,8 +21,6 @@ class Card:
         
     @property
     def emoji_name(self):
-        
-        # NOTE: Suit can only be these 5 values!
         match self.suit:
             case 'GL':
                 return 'acorn'
@@ -35,9 +35,11 @@ class Card:
     
     @staticmethod
     def random():
-        import random
-
-        return Card(random.choice(STANDARD_SUITS), random.choice(STANDARD_RANKS))
+        return Card(random.choice(SUITS), random.choice(RANKS + FACES))
+    
+    @staticmethod
+    def random_rank():
+        return Card(random.choice(SUITS), random.choice(RANKS))
     
     @staticmethod
     def to_card(card_fmt: str):

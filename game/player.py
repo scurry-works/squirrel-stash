@@ -1,10 +1,12 @@
 import asyncpg
+import random
 from dataclasses import dataclass, field
 
-from .card import Card
+from .card import Card, RANKS, SUITS, FACES
+from .cards import Cards
+from .select_event import SelectEvent
 
-MAX_HEALTH = 5
-MAX_HAND = 15
+MAX_HEALTH = 3
 OPTIONS_SIZE = 3
 
 """
@@ -37,7 +39,10 @@ class Player:
         record = await conn.fetchrow(f"select * from player where user_id = {self.user_id}")
 
         if not record:
-            options = [Card.random().to_str() for _ in range(OPTIONS_SIZE)]
+            options = [
+                Card.random_rank().to_str() 
+                for _ in range(OPTIONS_SIZE)
+            ]
 
             await conn.execute("insert into player values ($1, 0, $2, 0, 0, 0, '{}', $3::text[])", self.user_id, MAX_HEALTH, options)
             record = await conn.fetchrow("select * from player where user_id = $1", self.user_id)
@@ -61,29 +66,47 @@ class Player:
 
         await conn.execute("update player set session_id = $1, hp = $2, score = $3, highscore = $4, hand = $5::text[], options = $6::text[], guild_id = $7 where user_id = $8",
             self.session_id, self.hp, self.score, self.highscore, new_hand, new_options, self.guild_id, self.user_id)
-    
-    def matches(self):
-        cards = {}
 
-        for c in self.hand:
-            cards[c.rank] = cards.setdefault(c.rank, 0) +1
-        
-        return {r: n for r, n in cards.items() if n > 1}
-    
-    def has_rank(self, rank: str):
-        return rank in [c.rank for c in self.hand]
-    
-    def pop_match(self, rank: str):
-        removed_cards = []
-        for _ in range(2):
-            card = next(c for c in self.hand if c.rank == rank)
-            self.hand.remove(card)
-            removed_cards.append(card)
-        return removed_cards
-        
-    def pop_rank(self, rank: str):
-        card = next((c for c in self.hand if c.rank == rank))
-        
-        self.hand.remove(card)
+    def add_card(self, card: Card):
+        new_hand = self.hand + [card]
 
-        return card
+        e = SelectEvent(
+            is_match=Cards.has_rank(self.hand, card), 
+            is_stash=Cards.sum_cards(new_hand) == 21
+        )
+
+        if e.is_stash:
+            e.points = 100
+
+            if Cards.all_one_suit(new_hand):
+                e.points = 500
+                e.suit = card.emoji_name
+
+            self.hand.clear()
+
+        elif e.is_match:
+            matching_card = Cards.get_next_card(self.hand, card)
+
+            e.points = 2 * card.value
+            if Cards.all_one_suit([matching_card, card]):
+                e.points *= 3
+                e.suit = card.emoji_name
+
+            self.hand.remove(matching_card)
+        else:
+            self.hand.append(card)
+        
+        self.score += e.points
+        
+        return e
+
+    def new_options(self):
+        ranks = random.sample(population=RANKS if len(self.hand) == 0 else RANKS + FACES, k=OPTIONS_SIZE)
+        suits = random.choices(population=SUITS, k=OPTIONS_SIZE)
+
+        new_options = [Card(s, r) for s, r in zip(suits, ranks)]
+
+        if random.randint(0, 100) > 80:
+            new_options[random.randint(0, OPTIONS_SIZE -1)] = Card('HP', '+1')
+
+        self.options = new_options

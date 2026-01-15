@@ -9,10 +9,9 @@ GUILD_ID = 905167903224123473
 
 from scurrypy import (
     Client,
-    Interaction, InteractionEvent, UserModel,
+    Interaction, InteractionEvent,
     MessagePart,
-    EmbedPart, EmbedField, EmbedImage, EmbedFooter,
-    StringSelect, SelectOption
+    EmbedPart, EmbedField, EmbedImage, EmbedFooter
 )
 
 client = Client(token=TOKEN)
@@ -29,66 +28,11 @@ commands = CommandsAddon(client, APP_ID, False)
 components = ComponentsAddon(client)
 bot_emojis = BotEmojisCacheAddon(client, APP_ID)
 
-from game import PostgresDB, Card, Player, OPTIONS_SIZE, MAX_HEALTH, STANDARD_SUITS, STANDARD_RANKS, MAX_HAND
+from game import PostgresDB,  Cards, Card, Player, SelectEvent, OPTIONS_SIZE, MAX_HEALTH, RANKS, SUITS
 db = PostgresDB(client, 'furmissile', 'squirrels', DB_PASSWORD)
 
 
-# --- Various Utils ---
-def sum_cards(cards: list[Card]):
-    from functools import reduce
-    return reduce(lambda x, y: x + y, [c.value for c in cards], 0)
-
-def all_one_suit(cards: list[Card]):
-    return cards[0].emoji_name if len(set([c.suit for c in cards])) == 1 else None
-
-def format_custom_id(command: str, user_id: int, session_id: str, *args):
-    return '_'.join([command, str(user_id), session_id] + [f"{n}" for n in args])
-
-def sort_cards(cards: list[Card]):
-    counts = {} # dict of card str -> n
-
-    for i in [c.to_str() for c in cards]: # dicts require hashable type (like str)
-        counts[i] = counts.setdefault(i, 0) +1
-
-    sorted_counts = sorted(counts.items(), key=lambda item: item[1], reverse=True) # sort by n
-
-    sorted_hand = []
-
-    for v, n in sorted_counts:
-        sorted_hand.extend([Card.to_card(v)] *n)
-
-    return sorted_hand
-
 # --- Common Message Formats ---
-def build_util_buttons(p: Player):
-    has_matches = any(p.matches())
-    has_b = p.has_rank('B')
-    has_p = p.has_rank('P')
-    has_w = p.has_rank('W') and any(c.rank != 'W' for c in p.hand)
-    has_21 = sum_cards(p.hand) == 21
-
-    return A.row([
-        A.success(format_custom_id('match', p.user_id, p.session_id), 'Match', bot_emojis.get_emoji('match')) 
-        if has_matches 
-        else A.secondary(format_custom_id('match', p.user_id, p.session_id), 'Match', bot_emojis.get_emoji('match'), True),
-
-        A.success(format_custom_id('stash', p.user_id, p.session_id), 'Stash 21', bot_emojis.get_emoji('stash'))
-        if has_21 
-        else A.secondary(format_custom_id('stash', p.user_id, p.session_id), 'Stash 21', bot_emojis.get_emoji('stash'), True),
-
-        A.success(format_custom_id('bookie', p.user_id, p.session_id), 'Use Bookie', bot_emojis.get_emoji('bookie')) 
-        if has_b
-        else A.secondary(format_custom_id('bookie', p.user_id, p.session_id), 'Use Bookie', bot_emojis.get_emoji('bookie'), True),
-
-        A.success(format_custom_id('pirate', p.user_id, p.session_id), 'Use Pirate', bot_emojis.get_emoji('pirate'))
-        if has_p 
-        else A.secondary(format_custom_id('pirate', p.user_id, p.session_id), 'Use Pirate', bot_emojis.get_emoji('pirate'), True),
-
-        A.success(format_custom_id('wizard', p.user_id, p.session_id), 'Use Wizard', bot_emojis.get_emoji('wizard'))
-        if has_w 
-        else A.secondary(format_custom_id('wizard', p.user_id, p.session_id), 'Use Wizard', bot_emojis.get_emoji('wizard'), True)
-    ])
-
 def build_player_options(p: Player):
     return A.row([
         A.primary(
@@ -101,7 +45,10 @@ def build_player_options(p: Player):
         A.danger(format_custom_id('restart', p.user_id, p.session_id), 'Restart') 
     )
 
-def build_game_embed(author: UserModel, p: Player, add_pts: int = 0):
+def format_custom_id(command: str, user_id: int, session_id: str, *args):
+    return '_'.join([command, str(user_id), session_id] + [f"{n}" for n in args])
+
+def build_game_embed(event: InteractionEvent, p: Player, add_pts: int = 0):
     space = bot_emojis.get_emoji('space').mention
     stash = bot_emojis.get_emoji('stash').mention
     highscore = bot_emojis.get_emoji('highscore').mention
@@ -112,16 +59,16 @@ def build_game_embed(author: UserModel, p: Player, add_pts: int = 0):
 
     return EmbedPart(
         title="Foraging...",
-        author=E.user_author(author),
+        author=E.user_author(event.member.user),
         fields=[
             EmbedField('Score',
                 f"{space}{stash} **{p.score}**" 
                 + (f' +**{add_pts}**' if add_pts else '')
                 + (f" ({highscore} **{p.highscore}**)" if p.highscore > 0 else '')),
 
-            EmbedField('Hearts' + (' (LAST STAND)' if p.hp == 0 else ''), hp_bar),
+            EmbedField('Hearts', hp_bar),
 
-            EmbedField(f'Hand ({sum_cards(p.hand)})',
+            EmbedField(f'Hand ({Cards.sum_cards(p.hand)})',
                 f'{space}'.join(
                     f"{bot_emojis.get_emoji(c.emoji_name).mention} **{c.rank}**" 
                     for c in p.hand) if p.hand else 'No cards.'
@@ -129,6 +76,11 @@ def build_game_embed(author: UserModel, p: Player, add_pts: int = 0):
         ]
     )
 
+def get_suit_emoji(suit: str):
+    return bot_emojis.get_emoji(suit).mention
+
+def format_card(card: Card):
+    return f"{get_suit_emoji(card.emoji_name)} **{card.rank}**"
 
 # --- Bot Interactions ---
 @commands.slash_command('play', 'Begin or resume your game!', guild_ids=GUILD_ID)
@@ -187,16 +139,14 @@ async def on_forage(bot: Client, interaction: Interaction):
     if throw_error:
         return
 
-    embed = build_game_embed(event.member.user, p)
+    embed = build_game_embed(event, p)
 
     row = build_player_options(p)
-
-    util_row = build_util_buttons(p)
 
     await interaction.update(
         MessagePart(
             embeds=[embed],
-            components=[row, util_row]
+            components=[row]
         )
     )
 
@@ -218,306 +168,82 @@ async def on_select(bot: Client, interaction: Interaction):
         await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
         await conn.close()
         return
-        
-    if len(p.hand) >= MAX_HAND:
-        await interaction.respond("Woah, nelly! Clear some cards before adding more!", ephemeral=True)
-        await conn.close()
-        return
 
+    select_card = p.options[int(button_idx)]
     throw_error = False
 
+    add_pts = 0
+    description = ""
+
     try:
-        hp_loss = False
-
-        button_idx = int(button_idx)
-
-        if p.options[button_idx].suit == 'HP':
+        import random
+        if select_card.suit == 'HP':
             p.hp += (1 if p.hp < MAX_HEALTH else 0)
-        else:
-            p.hand.append(p.options[button_idx])
 
-            # check if hand is already busted
-            if sum_cards(p.hand) > 21 and p.hp > 0:
-                p.hp -= 1
-                hp_loss = True
+        elif select_card.rank == 'B':
+            rank_one, rank_two = tuple(random.sample(population=RANKS, k=2))
+            suit_one, suit_two = tuple(random.choices(population=SUITS, k=2))
 
-        import random
-        ranks = random.sample(population=STANDARD_RANKS, k=OPTIONS_SIZE)
-        suits = random.choices(population=STANDARD_SUITS, k=OPTIONS_SIZE)
+            card_one = Card(suit_one, rank_one)
+            card_two = Card(suit_two, rank_two)
 
-        new_options = [Card(s, r) for s, r in zip(suits, ranks)]
+            description = f"Bookie drew: {format_card(card_one)} + {format_card(card_two)} \n"
 
-        if random.randint(0, 100) > 80:
-            new_options[random.randint(0, OPTIONS_SIZE -1)] = Card('HP', '+1')
+            e_one = p.add_card(card_one)
+            e_two = p.add_card(card_two)
 
-        p.options = new_options
-
-        p.hand = sort_cards(p.hand)
-
-        await p.save(conn)
-    except Exception as e:
-        await interaction.respond("An error occurred!", ephemeral=True)
-        logger.error(e)
-        throw_error = True
-    finally:
-        await conn.close()
-
-    if throw_error:
-        return
-
-    embed = build_game_embed(event.member.user, p)
-
-    if hp_loss:
-        embed.description = f"*Busted!* \n-**1** {bot_emojis.get_emoji('broken_heart').mention} Heart"
-
-    row = build_player_options(p)
-
-    util_row = build_util_buttons(p)
-
-    await interaction.update(
-        MessagePart(
-            embeds=[embed],
-            components=[row, util_row]
-        )
-    )
-
-
-@components.button('match_*')
-async def on_match(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
-
-    _, user_id, session_id = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
-        return
-
-    conn = await db.get_connection()
-
-    p = await Player(event.member.user.id).fetch(conn)
-    
-    if session_id != p.session_id:
-        await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
-        await conn.close()
-        return
-
-    create_select_menu = False
-    points = 0
-    throw_error = False
-    matching_suit = None
-
-    try:
-        matches = p.matches() # len can only be 1 or greater (0 is filtered by disabling this interaction)
-
-        if len(matches) == 1:
-            only_match = list(matches.keys())[0]
-            pair = p.pop_match(only_match)
-            points = 2 * Card(None, only_match).value # make popped rank a card for the value prop
-            matching_suit = all_one_suit(pair)
-
-            if matching_suit:
-                points *= 3
-            p.score += points 
-            await p.save(conn)
-        else:
-            create_select_menu = True
-
-        await p.save(conn)
-    except Exception as e:
-        await interaction.respond("An error occurred!", ephemeral=True)
-        logger.error(e)
-        throw_error = True
-    finally:
-        await conn.close()
-
-    if throw_error:
-        return
-    
-    embed = build_game_embed(event.member.user, p, points)
-
-    if matching_suit:
-        suit_emoji = bot_emojis.get_emoji(matching_suit).mention
-        embed.description = f"{suit_emoji} *Match Bonus!* {suit_emoji}"
-    
-    if create_select_menu:
-        select_menu = A.row([
-            StringSelect(
-                custom_id=format_custom_id('select match', p.user_id, p.session_id), 
-                options=[
-                    SelectOption(label=r, value=r) 
-                    for r in list(matches.keys())
-                ],
-                placeholder='Select match...'
-            )
-        ])
-
-        back = A.row([
-            A.danger(format_custom_id('start', p.user_id, p.session_id), 'Back')
-        ])
-
-        await interaction.update(
-            MessagePart(
-                embeds=[embed],
-                components=[select_menu, back]
-            )
-        )
-    else:
-        row = build_player_options(p)
-
-        util_row = build_util_buttons(p)
-
-        await interaction.update(
-            MessagePart(
-                embeds=[embed],
-                components=[row, util_row]
-            )
-        )
-
-@components.select('select match_*')
-async def on_select_match(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
-
-    _, user_id, session_id = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
-        return
-
-    conn = await db.get_connection()
-
-    p = await Player(event.member.user.id).fetch(conn)
-    
-    if session_id != p.session_id:
-        await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
-        await conn.close()
-        return
-    
-    throw_error = False
-    matching_suit = None
-
-    try:
-        pair: list[Card] = p.pop_match(event.data.values[0])
-        points = 2 * Card(None, event.data.values[0]).value # make popped rank a card for the value prop
-
-        matching_suit = all_one_suit(pair)
-
-        if matching_suit:
-            points *= 3
-
-        p.score += points 
-
-        await p.save(conn)
-    except Exception as e:
-        await interaction.respond("An error occurred!", ephemeral=True)
-        logger.error(e)
-        throw_error = True
-    finally:
-        await conn.close()
-
-    if throw_error:
-        return
-
-    embed = build_game_embed(event.member.user, p, points)
-
-    if matching_suit:
-        suit_emoji = bot_emojis.get_emoji(matching_suit).mention
-        embed.description = f"{suit_emoji} *Match Bonus!* {suit_emoji}"
-
-    row = build_player_options(p)
-
-    util_row = build_util_buttons(p)
-
-    await interaction.update(
-        MessagePart(
-            embeds=[embed],
-            components=[row, util_row]
-        )
-    )
-
-
-@components.button('bookie_*')
-async def on_bookie(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
-
-    _, user_id, session_id = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
-        return
-
-    conn = await db.get_connection()
-
-    p = await Player(event.member.user.id).fetch(conn)
-    
-    if session_id != p.session_id:
-        await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
-        await conn.close()
-        return
-    
-    if len(p.hand) == 1: # bookie is the ONLY card in hand
-        await interaction.respond("Bookie needs another card in hand to be used!", ephemeral=True)
-        await conn.close()
-        return
-    
-    embed = build_game_embed(event.member.user, p)
-
-    select_menu = A.row([
-        StringSelect(
-            format_custom_id('use bookie', p.user_id, p.session_id),
-            options=[SelectOption(r, r) for r in list(dict.fromkeys([c.rank for c in p.hand if c.rank != 'B']))],
-            placeholder='Pick a card to replace...'
-        )
-    ])
-
-    special_options = A.row([
-        A.danger(format_custom_id('start', p.user_id, p.session_id), 'Back')
-    ])
-
-    await interaction.update(
-        MessagePart(
-            embeds=[embed],
-            components=[select_menu, special_options]
-        )
-    )
-
-    await conn.close()
-
-@components.button('use bookie_*')
-async def on_use_bookie(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
-
-    _, user_id, session_id = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
-        return
-
-    conn = await db.get_connection()
-
-    p = await Player(event.member.user.id).fetch(conn)
-    
-    if session_id != p.session_id:
-        await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
-        await conn.close()
-        return
-
-    bookie_success = False
-    throw_error = False
-    card_select = None
-    add_pts = 0
-
-    try:
-        card_select = Card.random()
-
-        if not sum_cards(p.hand + [card_select]) > 21:
-            bookie_success = True
-            add_pts = 20
-            # remove original + add new IF success
-            p.pop_rank(event.data.values[0])
-            p.hand.append(card_select)
-            p.score += add_pts
+            if e_one.suit:
+                card_suit = get_suit_emoji(e_one.suit)
+                description += f"{card_suit} *" + ("Match Bonus!" if e_one.is_match else "Stash Bonus!") + f"* {card_suit} \n"
             
-        p.pop_rank('B')  # Bookie is consumed either way
+            if e_two.suit:
+                card_suit = get_suit_emoji(e_two.suit)
+                description += f"{card_suit} *" + ("Match Bonus!" if e_two.is_match else "Stash Bonus!") + f"* {card_suit} \n"
+
+            add_pts = e_one.points + e_two.points
+
+        elif select_card.rank == 'P':
+            # pull all targets with the same guild id and a non-empty hand
+            records = await conn.fetch("select user_id from player where user_id != $1 and hand != '{}' and hp > 0 order by random()", p.user_id)
+
+            if len(records) == 0:
+                card_select = Card.random_rank()
+                description += f"*No targets available.* \nPirate drew: {format_card(card_select)} \n"
+            else:
+                random_opponent = random.choice(records)
+                opponent = await Player(random_opponent['user_id']).fetch(conn)
+                card_select = opponent.hand.pop(random.randint(0, len(opponent.hand) -1))
+                await opponent.save(conn)
+
+                description += f"You stole a {format_card(card_select)}!"
+                await bot.channel(event.channel_id).send(f"<@{opponent.user_id}>, **{event.member.nick or event.member.user.username}** has stolen your {format_card(card_select)}!")
+
+            e = p.add_card(card_select)
+
+            if e.suit:
+                card_suit = get_suit_emoji(e.suit)
+                description += f"{card_suit} *" + ("Match Bonus!" if e.is_match else "Stash Bonus!") + f"* {card_suit} \n"
+
+            add_pts = e.points
+
+        elif select_card.rank == 'W':
+            highest_card = Cards.get_highest_card(p.hand)
+            add_pts = 2 * highest_card.value
+            p.hand.remove(highest_card)
+
+        else: 
+            e = p.add_card(select_card)
+
+            if e.suit:
+                card_suit = get_suit_emoji(e.suit)
+                description += f"{card_suit} *" + ("Match Bonus!" if e.is_match else "Stash Bonus!") + f"* {card_suit} \n"
+
+            if Cards.sum_cards(p.hand) > 21:
+                p.hp -= 1
+                description += f"*Busted!* \n-**1** {bot_emojis.get_emoji('broken_heart').mention} Heart"
+
+            add_pts = e.points
+        p.new_options()
 
         await p.save(conn)
     except Exception as e:
@@ -529,263 +255,19 @@ async def on_use_bookie(bot: Client, interaction: Interaction):
 
     if throw_error:
         return
-    
-    embed = build_game_embed(event.member.user, p, add_pts)
 
-    select_card_fmt = f"{bot_emojis.get_emoji(card_select.emoji_name).mention} **{card_select.rank}**"
-    embed.description = f"Bookie drew: {select_card_fmt} \n" + ("*Bookie Stashed!*" if bookie_success else "*Bookie Lost!*")
+    embed = build_game_embed(event, p, add_pts)
 
-    row = build_player_options(p)
-
-    util_row = build_util_buttons(p)
-
-    await interaction.update(
-        MessagePart(
-            embeds=[embed],
-            components=[row, util_row]
-        )
-    )
-
-
-@components.button('pirate_*')
-async def on_pirate(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
-
-    _, user_id, session_id = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
-        return
-
-    conn = await db.get_connection()
-
-    p = await Player(event.member.user.id).fetch(conn)
-
-    if session_id != p.session_id:
-        await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
-        return
-
-    throw_error = False
-    pirate_success = False
-
-    try:
-        import random
-
-        # pull all targets with the same guild id and a non-empty hand
-        records = await conn.fetch("select user_id from player where user_id != $1 and hand != '{}' and hp > 0 order by random()", p.user_id)
-
-        if len(records) == 0:
-            card_select = Card.random()
-        else:
-            pirate_success = True
-
-            random_opponent = random.choice(records)
-
-            opponent = await Player(random_opponent['user_id']).fetch(conn)
-
-            card_select = opponent.hand.pop(random.randint(0, len(opponent.hand) -1))
-
-            await opponent.save(conn)
-
-        p.pop_rank('P')
-        p.hand.append(card_select)
-
-        await p.save(conn)
-    except Exception as e:
-        await interaction.respond("An error occurred!", ephemeral=True)
-        logger.error(e)
-        throw_error = True
-    finally:
-        await conn.close()
-
-    if throw_error:
-        return
-    
-    embed = build_game_embed(event.member.user, p)
-
-    select_card_fmt = f"{bot_emojis.get_emoji(card_select.emoji_name).mention} **{card_select.rank}**"
-
-    if pirate_success:
-        embed.description = f"You stole a {select_card_fmt}!"
-
-        await bot.channel(event.channel_id).send(f"<@{opponent.user_id}>, **{event.member.nick or event.member.user.username}** has stolen your {select_card_fmt}!")
-    else:
-        embed.description = f"*No targets available.* \nPirate drew: {select_card_fmt}"
+    embed.description = description
 
     row = build_player_options(p)
 
-    util_row = build_util_buttons(p)
-
     await interaction.update(
         MessagePart(
             embeds=[embed],
-            components=[row, util_row]
+            components=[row]
         )
     )
-
-
-@components.button('wizard_*')
-async def on_wizard(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
-
-    _, user_id, session_id = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
-        return
-
-    conn = await db.get_connection()
-
-    p = await Player(event.member.user.id).fetch(conn)
-    
-    if session_id != p.session_id:
-        await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
-        await conn.close()
-        return
-
-    embed = build_game_embed(event.member.user, p)
-
-    select_menu = A.row([
-        StringSelect(
-            format_custom_id('use wizard', p.user_id, p.session_id),
-            options=[SelectOption(r, r) for r in list(dict.fromkeys([c.rank for c in p.hand if c.rank != 'W']))],
-            placeholder='Pick a card to discard...'
-        )
-    ])
-
-    special_options = A.row([
-        A.danger(format_custom_id('start', p.user_id, p.session_id), 'Back')
-    ])
-
-    await interaction.update(
-        MessagePart(
-            embeds=[embed],
-            components=[select_menu, special_options]
-        )
-    )
-
-    await conn.close()
-
-@components.select('use wizard_*')
-async def on_use_wizard(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
-
-    _, user_id, session_id = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
-        return
-
-    conn = await db.get_connection()
-
-    p = await Player(event.member.user.id).fetch(conn)
-    
-    if session_id != p.session_id:
-        await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
-        await conn.close()
-        return
-
-    throw_error = False
-    add_pts = 0
-
-    try:
-        p.pop_rank('W')
-
-        discarded = p.pop_rank(event.data.values[0])
-
-        add_pts = (discarded.value *2) + 10 # includes W value + match
-
-        p.score += add_pts
-
-        await p.save(conn)
-    except Exception as e:
-        await interaction.respond("An error occurred!", ephemeral=True)
-        logger.error(e)
-        throw_error = True
-    finally:
-        await conn.close()
-
-    if throw_error:
-        return
-    
-    embed = build_game_embed(event.member.user, p, add_pts)
-
-    row = build_player_options(p)
-
-    util_row = build_util_buttons(p)
-
-    await interaction.update(
-        MessagePart(
-            embeds=[embed],
-            components=[row, util_row]
-        )
-    )
-
-
-@components.button('stash_*')
-async def on_stash(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
-
-    _, user_id, session_id = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
-        return
-
-    conn = await db.get_connection()
-
-    p = await Player(event.member.user.id).fetch(conn)
-    
-    if session_id != p.session_id:
-        await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
-        await conn.close()
-        return
-    
-    score = 0
-
-    throw_error = False
-    suit = None
-    
-    try:
-        suit = all_one_suit(p.hand)
-
-        if suit:
-            score = 500
-        else:
-            score = 100 # STASH 21 value
-
-        p.score += score 
-
-        p.hand.clear()
-
-        await p.save(conn)
-    except Exception as e:
-        await interaction.respond("An error occurred!", ephemeral=True)
-        logger.error(e)
-        throw_error = True
-    finally:
-        await conn.close()
-
-    if throw_error:
-        return
-    
-    embed = build_game_embed(event.member.user, p, score)
-
-    if suit:
-        suit_emoji = bot_emojis.get_emoji(suit).mention
-        embed.description = f"{suit_emoji} *Stash Bonus!* {suit_emoji}"
-
-    row = build_player_options(p)
-
-    util_row = build_util_buttons(p)
-
-    await interaction.update(
-        MessagePart(
-            embeds=[embed],
-            components=[row, util_row]
-        )
-    )
-
 
 @components.button('restart_*')
 async def on_restart(bot: Client, interaction: Interaction):
@@ -827,16 +309,14 @@ async def on_restart(bot: Client, interaction: Interaction):
     if throw_error:
         return
     
-    embed = build_game_embed(event.member.user, reset_p)
+    embed = build_game_embed(event, reset_p)
 
     row = build_player_options(reset_p)
-
-    util_row = build_util_buttons(reset_p)
 
     await interaction.update(
         MessagePart(
             embeds=[embed],
-            components=[row, util_row]
+            components=[row]
         )
     )
 
@@ -849,10 +329,11 @@ GAME_HELP = {
             "Game ends when you run out of hearts."
         ]),
     1: wrap_help_field('Stashing', [
-            "Stash when the sum of your hand is exactly **21** (worth 100 points).",
-            "Or stash matching pairs of the same rank (worth *twice* the matching card's value).",
+            "Stashing occurs automatically when there's a match to be made or your hand sums to 21.",
+            "Hitting 21 is worth 100 points.",
+            "Pairs of the same rank is worth *twice* the matching card's value.",
             "If matching a pair of the same suit, the match score is **tripled** (3×).",
-            "If stashing 21 with all one suit (flush), you earn **500 points** instead of 100 (5×)."
+            "If stashing 21 with all one suit, you earn **500 points** instead of 100 (5×)."
         ]),
     2: wrap_help_field('Busting', [
             "You hand is busted when its sum exceeds 21.",
@@ -860,12 +341,11 @@ GAME_HELP = {
             "Hearts can be found to restore hearts."
         ]),
     3: wrap_help_field('Face Cards', [
-            "Face cards are Ace (A), Bookie (B), Pirate (P), and Wizard (W).",
-            "Ace is worth 1 point in hand.",
-            "The Bookie, Pirate, and Wizard are all worth 10 points in hand.",
-            "**Bookie**: Replace a card with a new draw. On success: stash Bookie (+20 pts) and keep the card. On bust: lose both.",
-            "**Pirate**: Steal a random card from a random player. If no targets available, draws a card instead.",
-            "**Wizard**: Discard a card + Wizard to immediately score `(card value ×2) +10` points."
+            "**Ace (A)** is worth 1 point in hand.",
+            "The Bookie, Pirate, and Wizard are all executed immediately upon selecting and do NOT go in hand.",
+            "**Bookie (B)**: Draw 2 random cards.",
+            "**Pirate (P)**: Steal a random card from a random player. If no targets available, draws a card instead.",
+            "**Wizard (W)**: Discard the card of highest value + Wizard worth `(card value ×2) +10` points."
         ]),
     4: wrap_help_field('Support', [
             "Need more help or looking to report a bug? Join the [support server](https://discord.gg/D4SdHxcujM)!"
