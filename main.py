@@ -64,7 +64,7 @@ def build_game_embed(event: InteractionEvent, p: Player, add_pts: int = 0):
             EmbedField('Score',
                 f"{space}{stash} **{p.score}**" 
                 + (f' +**{add_pts}**' if add_pts else '')
-                + (f" ({highscore} **{p.highscore}**)" if p.highscore > 0 else '')),
+                + (f" ({highscore} **{p.highscore}**)" if p.highscore > 0 and p.score > p.highscore else '')),
 
             EmbedField('Hearts', hp_bar),
 
@@ -249,9 +249,9 @@ async def on_select(bot: Client, interaction: Interaction):
 
             add_pts = e.points
 
-            if Cards.sum_cards(p.hand) > 21:
-                p.hp -= 1
-                description += f"*Busted!* \n-**1** {bot_emojis.get_emoji('broken_heart').mention} Heart"
+        if Cards.sum_cards(p.hand) > 21:
+            p.hp -= 1
+            description += f"*Busted!* \n-**1** {bot_emojis.get_emoji('broken_heart').mention} Heart"
 
         p.new_options()
 
