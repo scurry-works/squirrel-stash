@@ -87,11 +87,11 @@ def append_event(e: CardEvent):
 
     if e.is_stash and e.stash_suit:
         card_suit = get_suit_emoji(e.stash_suit)
-        description += f"{card_suit} *Stash Bonus!* {card_suit} \n"
+        description += f"{card_suit} *Stash Bonus!* {card_suit} \n\n"
 
     if e.is_match and e.match_suit:
         card_suit = get_suit_emoji(e.match_suit)
-        description += f"{card_suit} *Match Bonus!* {card_suit} \n"
+        description += f"{card_suit} *Match Bonus!* {card_suit} \n\n"
 
     return description
 
@@ -335,29 +335,29 @@ wrap_help_field = lambda name, values: EmbedField('{acorn} ' + name, '\n'.join([
 
 GAME_HELP = {
     0: wrap_help_field('Gameplay', [
-            "**GOAL**: Accumulate the highest score!",
+            "**GOAL**: Accumulate the highest score by matching or stashing **21**.",
             "Add cards to your hand by selecting from the given choices.",
             "All cards are worth their rank in hand. Ace is worth **1** point.",
             "Game ends when you run out of hearts."
         ]),
     1: wrap_help_field('Stashing', [
-            "Hitting 21 is worth 100 points.",
-            "Pairs of the same rank are worth the value of both cards.",
-            "If matching a pair of the same suit, the match score is **doubled** (2×).",
-            "If stashing 21 of all one suit, you earn **500 points** instead of 100 (5×).",
-            "Making matches and hitting 21 are automatically done with 21 being checked first."
+            "Hitting **21** is worth **100** points and clears your hand.",
+            "Matching **2** cards of the same rank is worth **double** the matching rank and removes them from your hand.",
+            "If the matched cards share a suit, the match score is **doubled**.",
+            "If your hand shares a suit when stashing **21**, you earn **500** points instead.",
+            "**Resolve order:** 21 Stash → Matching → Busting"
         ]),
     2: wrap_help_field('Busting', [
-            "You hand is busted when its sum exceeds 21 (sum is shown in parentheses).",
-            "Lose 1 heart for each bust.",
-            "Hearts can be found in choices to restore hearts."
+            "Your hand is busted when its sum exceeds **21** *after resolution* (sum is shown in parentheses).",
+            "Lose **1** heart for each bust.",
+            "Restore hearts by selecting them from the choices when they appear."
         ]),
     3: wrap_help_field('Face Cards', [
             "Face cards include the Bookie (B), Pirate (P), and Wizard (W).",
             "Face cards are executed immediately upon selecting and do NOT go in hand.",
-            "**Bookie (B)**: Draw 2 random cards.",
+            "**Bookie (B)**: Draw **2** random cards.",
             "**Pirate (P)**: Steal a random card from a random player. If no targets available, draws a card instead.",
-            "**Wizard (W)**: Stash the card of highest value for double (2×) its value."
+            "**Wizard (W)**: Stash the highest-value card in your hand for **double** its value (as if matched)."
         ]),
     4: wrap_help_field('Support', [
             "Need more help or looking to report a bug? Join the [support server](https://discord.gg/D4SdHxcujM)!"
