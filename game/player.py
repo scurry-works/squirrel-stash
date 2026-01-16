@@ -34,10 +34,13 @@ class Player:
     hand: list[str | Card] = field(default_factory=list)
     options: list[str | Card] = field(default_factory=list)
 
-    async def fetch(self, conn: asyncpg.Connection):
+    async def fetch(self, conn: asyncpg.Connection, auto_insert: bool = True):
         record = await conn.fetchrow(f"select * from player where user_id = {self.user_id}")
 
         if not record:
+            if not auto_insert:
+                return False
+            
             options = [
                 Card.random_rank().to_str() 
                 for _ in range(OPTIONS_SIZE)

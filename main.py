@@ -11,7 +11,7 @@ from scurrypy import (
     Client,
     Interaction, InteractionEvent,
     MessagePart,
-    EmbedPart, EmbedField, EmbedImage, EmbedFooter
+    EmbedPart, EmbedField, EmbedImage, EmbedFooter, EmbedThumbnail
 )
 
 client = Client(token=TOKEN)
@@ -28,7 +28,7 @@ commands = CommandsAddon(client, APP_ID, False)
 components = ComponentsAddon(client)
 bot_emojis = BotEmojisCacheAddon(client, APP_ID)
 
-from game import PostgresDB,  Cards, Card, Player, CardEvent, OPTIONS_SIZE, MAX_HEALTH, RANKS, SUITS
+from game import PostgresDB,  Cards, Card, Player, CardEvent, Leaderboard, MAX_HEALTH, RANKS, SUITS
 db = PostgresDB(client, 'furmissile', 'squirrels', DB_PASSWORD)
 
 
@@ -87,11 +87,11 @@ def append_event(e: CardEvent):
 
     if e.is_stash and e.stash_suit:
         card_suit = get_suit_emoji(e.stash_suit)
-        description += f"{card_suit} *Stash Bonus!* {card_suit} \n\n"
+        description += f"{card_suit} **Stash Bonus!** {card_suit} \n\n"
 
     if e.is_match and e.match_suit:
         card_suit = get_suit_emoji(e.match_suit)
-        description += f"{card_suit} *Match Bonus!* {card_suit} \n\n"
+        description += f"{card_suit} **Match Bonus!** {card_suit} \n\n"
 
     return description
 
@@ -237,11 +237,21 @@ async def on_select(bot: Client, interaction: Interaction):
             p.hand.remove(highest_card)
 
             e = CardEvent(points=2 * highest_card.value)
+
             p.hand = e.check_21(p.hand, highest_card)
+
+            e.is_match = not e.is_stash and Cards.all_one_suit([select_card, highest_card])
+
+            if e.is_match:
+                e.match_suit = select_card.emoji_name
+                e.points *=2
+
+            p.score += e.points
 
             description += append_event(e)
             
             add_pts = e.points
+        
         else: 
             e = p.add_card(select_card)
 
@@ -409,7 +419,7 @@ def build_help_message(event: InteractionEvent, page_num: int):
         components=[page_buttons]
     )
 
-@commands.slash_command('help', 'Need some assistance?')
+@commands.slash_command('help', 'Need some assistance?', guild_ids=GUILD_ID)
 async def on_help(bot: Client, interaction: Interaction):
     event: InteractionEvent = interaction.context
 
@@ -442,5 +452,57 @@ async def on_next_page(bot: Client, interaction: Interaction):
 async def on_to_end(bot: Client, interaction: Interaction):
     await respond_help(interaction)
 
+@commands.slash_command('leaderboard', 'Check out the biggest hoarders around!', guild_ids=GUILD_ID)
+async def on_leaderboard(bot: Client, interaction: Interaction):
+    event: InteractionEvent = interaction.context
+
+    conn = await db.get_connection()
+    footer = EmbedFooter('⭐ Your Rank: Unranked | Global Rank: Unranked')
+    
+    try:
+        leaderboard = Leaderboard()
+
+        entries = await leaderboard.fetch(conn, event.guild_id)
+
+        if not entries:
+            await interaction.respond("No records could be found! Please try again later.", ephemeral=True)
+            await conn.close()
+            return
+        
+        is_player = await Player(event.member.user.id).fetch(conn, False)
+
+        if is_player:
+            global_player = await leaderboard.fetch_global_player(conn, event.member.user.id)
+
+            if global_player:
+                local_player = await leaderboard.fetch_local_player(conn, event.guild_id, event.member.user.id)
+
+                if not local_player:
+                    footer = EmbedFooter(
+                        f'⭐ Your Rank: Unranked | Global Rank: #{global_player.rank}'
+                    )
+                else:
+                    footer = EmbedFooter(
+                        f'⭐ Your Rank: #{local_player.rank} | Global Rank: #{global_player.rank}'
+                    )
+
+        space = bot_emojis.get_emoji('space').mention
+
+        fmt_entries = '\n'.join([
+            f"{space} **{e.rank}.**  <@{e.user_id}> - **{e.best_score}**"
+            for e in entries
+        ])
+
+    finally:
+        await conn.close()
+
+    embed = EmbedPart(
+        title='Leaderboard',
+        thumbnail=EmbedThumbnail('https://raw.githubusercontent.com/scurry-works/squirrel-stash/refs/heads/main/assets/bookie.png'),
+        description=fmt_entries,
+        footer=footer
+    )
+
+    await interaction.respond(MessagePart(embeds=[embed]))
 
 client.run()
