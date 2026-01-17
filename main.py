@@ -64,7 +64,7 @@ def build_game_embed(event: InteractionEvent, p: Player, add_pts: int = 0):
             EmbedField('Score',
                 f"{space}{stash} **{p.score}**" 
                 + (f' +**{add_pts}**' if add_pts else '')
-                + (f" ({highscore} **{p.highscore}**)" if p.highscore > 0 and p.score > p.highscore else '')),
+                + (f" ({highscore} **{p.highscore}**)" if p.highscore > 0 and p.score < p.highscore else '')),
 
             EmbedField('Hearts', hp_bar),
 
@@ -87,11 +87,11 @@ def append_event(e: CardEvent):
 
     if e.is_stash and e.stash_suit:
         card_suit = get_suit_emoji(e.stash_suit)
-        description += f"{card_suit} **Stash Bonus!** {card_suit} \n\n"
+        description += f"{card_suit} **Stash Bonus!** {card_suit} \n"
 
     if e.is_match and e.match_suit:
         card_suit = get_suit_emoji(e.match_suit)
-        description += f"{card_suit} **Match Bonus!** {card_suit} \n\n"
+        description += f"{card_suit} **Match Bonus!** {card_suit} \n"
 
     return description
 
@@ -200,7 +200,7 @@ async def on_select(bot: Client, interaction: Interaction):
             card_one = Card(suit_one, rank_one)
             card_two = Card(suit_two, rank_two)
 
-            description = f"Bookie drew: {format_card(card_one)} + {format_card(card_two)} \n"
+            description = f"\nBookie drew: {format_card(card_one)} + {format_card(card_two)} \n"
 
             e_one = p.add_card(card_one)
             e_two = p.add_card(card_two)
@@ -216,14 +216,14 @@ async def on_select(bot: Client, interaction: Interaction):
 
             if len(records) == 0:
                 card_select = Card.random_rank()
-                description += f"*No targets available.* \nPirate drew: {format_card(card_select)} \n"
+                description += f"\n*No targets available.* \nPirate drew: {format_card(card_select)} \n"
             else:
                 random_opponent = random.choice(records)
                 opponent = await Player(random_opponent['user_id']).fetch(conn)
                 card_select = opponent.hand.pop(random.randint(0, len(opponent.hand) -1))
                 await opponent.save(conn)
 
-                description += f"You stole a {format_card(card_select)}!"
+                description += f"\nYou stole a {format_card(card_select)}! \n"
                 await bot.channel(event.channel_id).send(f"<@{opponent.user_id}>, **{event.member.nick or event.member.user.username}** has stolen your {format_card(card_select)}!")
 
             e = p.add_card(card_select)
@@ -261,7 +261,7 @@ async def on_select(bot: Client, interaction: Interaction):
 
         if Cards.sum_cards(p.hand) > 21:
             p.hp -= 1
-            description += f"*Busted!* \n-**1** {bot_emojis.get_emoji('broken_heart').mention} Heart"
+            description += f"\n*Busted!* \n-**1** {bot_emojis.get_emoji('broken_heart').mention} Heart \n"
 
         p.new_options()
 
