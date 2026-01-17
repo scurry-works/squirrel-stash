@@ -1,2 +1,5 @@
 .env
 notes/
+docs/
+site/
+mkdocs.yaml
