@@ -2,7 +2,9 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-TOKEN = os.getenv("BETA_TOKEN")
+IS_BETA = True
+
+TOKEN = os.getenv("BETA_TOKEN" if IS_BETA else "GAME_TOKEN")
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 APP_ID = 1386436781330923753
 GUILD_ID = 905167903224123473
@@ -24,7 +26,7 @@ from scurry_kit import (
 
 logger = setup_default_logger()
 
-commands = CommandsAddon(client, APP_ID, False)
+commands = CommandsAddon(client, APP_ID)
 components = ComponentsAddon(client)
 bot_emojis = BotEmojisCacheAddon(client, APP_ID)
 
@@ -96,7 +98,7 @@ def append_event(e: CardEvent):
     return description
 
 # --- Bot Interactions ---
-@commands.slash_command('play', 'Begin or resume your game!', guild_ids=GUILD_ID)
+@commands.slash_command('play', 'Begin or resume your game!', guild_ids=GUILD_ID if IS_BETA else None)
 async def on_start(bot: Client, interaction: Interaction):
     event: InteractionEvent = interaction.context
 
@@ -137,8 +139,7 @@ async def on_forage(bot: Client, interaction: Interaction):
     try:
         p.session_id = session_id
 
-        if p.guild_id != event.guild_id:
-            p.guild_id = event.guild_id
+        p.guild_id = event.guild_id
 
         await p.save(conn)
 
@@ -419,7 +420,7 @@ def build_help_message(event: InteractionEvent, page_num: int):
         components=[page_buttons]
     )
 
-@commands.slash_command('help', 'Need some assistance?', guild_ids=GUILD_ID)
+@commands.slash_command('help', 'Need some assistance?', guild_ids=GUILD_ID if IS_BETA else None)
 async def on_help(bot: Client, interaction: Interaction):
     event: InteractionEvent = interaction.context
 
@@ -431,7 +432,7 @@ async def respond_help(interaction: Interaction):
     _, user_id, page_num = event.data.custom_id.split('_')
 
     if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
+        await interaction.respond("This message belongs to someone else! Send `/help` to initiate your own help pages.", ephemeral=True)
         return
 
     await interaction.update(build_help_message(event, int(page_num)))
@@ -452,7 +453,7 @@ async def on_next_page(bot: Client, interaction: Interaction):
 async def on_to_end(bot: Client, interaction: Interaction):
     await respond_help(interaction)
 
-@commands.slash_command('leaderboard', 'Check out the biggest hoarders around!', guild_ids=GUILD_ID)
+@commands.slash_command('leaderboard', 'Check out the biggest hoarders around!', guild_ids=GUILD_ID if IS_BETA else None)
 async def on_leaderboard(bot: Client, interaction: Interaction):
     event: InteractionEvent = interaction.context
 

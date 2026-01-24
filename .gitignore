@@ -3,3 +3,4 @@ notes/
 docs/
 site/
 mkdocs.yaml
+__pycache__/
