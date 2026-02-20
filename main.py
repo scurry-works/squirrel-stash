@@ -9,59 +9,69 @@ DB_PASSWORD = os.getenv('DB_PASSWORD')
 APP_ID = 1386436781330923753 if IS_BETA else 905163158149287936
 GUILD_ID = 905167903224123473
 
-from scurrypy import (
-    Client,
-    Interaction, InteractionEvent,
-    MessagePart,
-    EmbedPart, EmbedField, EmbedImage, EmbedFooter, EmbedThumbnail
+import logging
+from rich.logging import RichHandler
+
+logger = logging.getLogger("scurrypy")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(show_path=False, rich_tracebacks=True)],
 )
+
+from scurrypy import Client
+from scurrypy.enums import ButtonStyle
+from scurrypy.api import EmojiModel
+from scurrypy.api.messages import MessagePart, Embed, EmbedField, EmbedImage, EmbedFooter, EmbedThumbnail
+from scurrypy.api.components import ActionRow, Button
+
+from scurrypy.ext.interactions import InteractionContext
+from scurrypy.ext.commands import CommandsAddon, ApplicationCommandContext
+from scurrypy.ext.components import ComponentsAddon, MessageComponentContext
+from scurrypy.ext.cache import ApplicationEmojisCacheAddon
 
 client = Client(token=TOKEN)
-
-from scurry_kit import (
-    CommandsAddon, ComponentsAddon, BotEmojisCacheAddon, 
-    EmbedBuilder as E, ActionRowBuilder as A, 
-    setup_default_logger
-)
-
-logger = setup_default_logger()
-
 commands = CommandsAddon(client, APP_ID)
 components = ComponentsAddon(client)
-bot_emojis = BotEmojisCacheAddon(client, APP_ID)
+app_emojis = ApplicationEmojisCacheAddon(client, APP_ID)
 
 from game import PostgresDB,  Cards, Card, Player, CardEvent, Leaderboard, MAX_HEALTH, RANKS, SUITS
 db = PostgresDB(client, 'furmissile', 'squirrels', DB_PASSWORD)
 
-
 # --- Common Message Formats ---
-def build_player_options(p: Player):
-    return A.row([
-        A.primary(
-            custom_id=format_custom_id('select', p.user_id, p.session_id, i), 
-            label=p.options[i].rank,
-            emoji=bot_emojis.get_emoji(p.options[i].emoji_name)
-        )
-        for i in range(3)
-    ]) if p.hp > 0 else A.row(
-        A.danger(format_custom_id('restart', p.user_id, p.session_id), 'Restart') 
-    )
-
 def format_custom_id(command: str, user_id: int, session_id: str, *args):
     return '_'.join([command, str(user_id), session_id] + [f"{n}" for n in args])
 
-def build_game_embed(event: InteractionEvent, p: Player, add_pts: int = 0):
-    space = bot_emojis.get_emoji('space').mention
-    stash = bot_emojis.get_emoji('stash').mention
-    highscore = bot_emojis.get_emoji('highscore').mention
-    heart = bot_emojis.get_emoji('heart').mention
-    empty_heart = bot_emojis.get_emoji('empty_heart').mention
+def build_player_options(p: Player):
+    return ActionRow([
+        Button(
+            style=ButtonStyle.PRIMARY,
+            custom_id=format_custom_id('select', p.user_id, p.session_id, i), 
+            label=p.options[i].rank,
+            emoji=app_emojis.get_emoji(p.options[i].emoji_name)
+        )
+        for i in range(3)
+    ]) if p.hp > 0 else ActionRow([
+        Button(
+            style=ButtonStyle.DANGER,
+            label="Restart",
+            custom_id=format_custom_id('restart', p.user_id, p.session_id)
+        )
+    ])
+
+def build_game_embed(ctx: InteractionContext, p: Player, add_pts: int = 0):
+    space = app_emojis.get_emoji('space').mention
+    stash = app_emojis.get_emoji('stash').mention
+    highscore = app_emojis.get_emoji('highscore').mention
+    heart = app_emojis.get_emoji('heart').mention
+    empty_heart = app_emojis.get_emoji('empty_heart').mention
 
     hp_bar = ' '.join([heart] * p.hp + [empty_heart] * (MAX_HEALTH - p.hp))
 
-    return EmbedPart(
+    embed = Embed(
         title="Foraging...",
-        author=E.user_author(event.member.user),
         fields=[
             EmbedField('Score',
                 f"{space}{stash} **{p.score}**" 
@@ -72,14 +82,18 @@ def build_game_embed(event: InteractionEvent, p: Player, add_pts: int = 0):
 
             EmbedField(f'Hand ({Cards.sum_cards(p.hand)})',
                 f'{space}'.join(
-                    f"{bot_emojis.get_emoji(c.emoji_name).mention} **{c.rank}**" 
+                    f"{app_emojis.get_emoji(c.emoji_name).mention} **{c.rank}**" 
                     for c in p.hand) if p.hand else 'No cards.'
             )
         ]
     )
 
+    embed.set_user_author(ctx.user)
+
+    return embed
+
 def get_suit_emoji(suit: str):
-    return bot_emojis.get_emoji(suit).mention
+    return app_emojis.get_emoji(suit).mention
 
 def format_card(card: Card):
     return f"{get_suit_emoji(card.emoji_name)} **{card.rank}**"
@@ -97,23 +111,25 @@ def append_event(e: CardEvent):
 
     return description
 
-# --- Bot Interactions ---
-@commands.slash_command('play', 'Begin or resume your game!', guild_ids=GUILD_ID if IS_BETA else None)
-async def on_start(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
-
-    embed = EmbedPart(
-        title=f'Welcome, {event.member.nick or event.member.user.username}!',
+@commands.slash_command('play', 'Begin or resume your game!', guild_ids=[GUILD_ID] if IS_BETA else None)
+async def on_start(ctx: ApplicationCommandContext):
+    embed = Embed(
+        title=f'Welcome, {ctx.member.nick or ctx.user.username}!',
         image=EmbedImage('https://raw.githubusercontent.com/scurry-works/squirrel-stash/refs/heads/main/assets/welcome.gif')
     )
 
     import uuid
 
-    row = A.row([
-        A.success(format_custom_id('start', event.member.user.id, str(uuid.uuid4())), 'Start', bot_emojis.get_emoji('acorn'))
+    row = ActionRow([
+        Button(
+            style=ButtonStyle.SUCCESS,
+            custom_id=format_custom_id('start', ctx.user.id, str(uuid.uuid4())),
+            label="Start",
+            emoji=app_emojis.get_emoji('acorn')
+        )
     ])
 
-    await interaction.respond(
+    await ctx.respond(
         MessagePart(
             embeds=[embed],
             components=[row]
@@ -121,30 +137,28 @@ async def on_start(bot: Client, interaction: Interaction):
     )
 
 @components.button('start_*')
-async def on_forage(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
+async def on_forage(ctx: MessageComponentContext):
+    _, user_id, session_id = ctx.data.custom_id.split('_')
 
-    _, user_id, session_id = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
+    if int(user_id) != ctx.user.id:
+        await ctx.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
         return
-
+    
     conn = await db.get_connection()
 
-    p = await Player(event.member.user.id).fetch(conn)
+    p = await Player(ctx.user.id).fetch(conn)
 
     throw_error = False
 
     try:
         p.session_id = session_id
 
-        p.guild_id = event.guild_id
+        p.guild_id = ctx.event.guild_id
 
         await p.save(conn)
 
     except Exception as e:
-        await interaction.respond("An error occurred!", ephemeral=True)
+        await ctx.respond("An error occurred!", ephemeral=True)
         logger.error(e)
         throw_error = True
     finally:
@@ -153,33 +167,27 @@ async def on_forage(bot: Client, interaction: Interaction):
     if throw_error:
         return
 
-    embed = build_game_embed(event, p)
+    embed = build_game_embed(ctx, p)
 
     row = build_player_options(p)
 
-    await interaction.update(
-        MessagePart(
-            embeds=[embed],
-            components=[row]
-        )
-    )
+    await ctx.update(embeds=[embed], components=[row])
 
 @components.button('select_*')
-async def on_select(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
+async def on_select(ctx: MessageComponentContext):
 
-    _, user_id, session_id, button_idx = event.data.custom_id.split('_')
+    _, user_id, session_id, button_idx = ctx.data.custom_id.split('_')
 
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
+    if int(user_id) != ctx.user.id:
+        await ctx.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
         return
 
     conn = await db.get_connection()
 
-    p = await Player(event.member.user.id).fetch(conn)
+    p = await Player(ctx.user.id).fetch(conn)
     
     if session_id != p.session_id:
-        await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
+        await ctx.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
         await conn.close()
         return
 
@@ -225,7 +233,7 @@ async def on_select(bot: Client, interaction: Interaction):
                 await opponent.save(conn)
 
                 description += f"\nYou stole a {format_card(card_select)}! \n"
-                await bot.channel(event.channel_id).send(f"<@{opponent.user_id}>, **{event.member.nick or event.member.user.username}** has stolen your {format_card(card_select)}!")
+                await ctx.channel.send(f"<@{opponent.user_id}>, **{ctx.member.nick or ctx.user.username}** has stolen your {format_card(card_select)}!")
 
             e = p.add_card(card_select)
 
@@ -262,13 +270,13 @@ async def on_select(bot: Client, interaction: Interaction):
 
         if Cards.sum_cards(p.hand) > 21:
             p.hp -= 1
-            description += f"\n*Busted!* \n-**1** {bot_emojis.get_emoji('broken_heart').mention} Heart \n"
+            description += f"\n*Busted!* \n-**1** {app_emojis.get_emoji('broken_heart').mention} Heart \n"
 
         p.new_options()
 
         await p.save(conn)
     except Exception as e:
-        await interaction.respond("An error occurred!", ephemeral=True)
+        await ctx.respond("An error occurred!", ephemeral=True)
         logger.error(e)
         throw_error = True
     finally:
@@ -277,35 +285,28 @@ async def on_select(bot: Client, interaction: Interaction):
     if throw_error:
         return
 
-    embed = build_game_embed(event, p, add_pts)
+    embed = build_game_embed(ctx, p, add_pts)
 
     embed.description = description
 
     row = build_player_options(p)
 
-    await interaction.update(
-        MessagePart(
-            embeds=[embed],
-            components=[row]
-        )
-    )
+    await ctx.update(embeds=[embed], components=[row])
 
 @components.button('restart_*')
-async def on_restart(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
+async def on_restart(ctx: MessageComponentContext):
+    _, user_id, session_id = ctx.data.custom_id.split('_')
 
-    _, user_id, session_id = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
+    if int(user_id) != ctx.user.id:
+        await ctx.respond("This message belongs to someone else! Send `/forage` to initiate your own forage.", ephemeral=True)
         return
 
     conn = await db.get_connection()
 
-    p = await Player(event.member.user.id).fetch(conn)
+    p = await Player(ctx.user.id).fetch(conn)
     
     if session_id != p.session_id:
-        await interaction.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
+        await ctx.respond("This appears to be an old message! Try sending `/forage` to renew a session.", ephemeral=True)
         await conn.close()
         return
     
@@ -313,7 +314,7 @@ async def on_restart(bot: Client, interaction: Interaction):
 
     try:
         reset_p = Player(
-            event.member.user.id, 
+            ctx.user.id, 
             p.session_id, 
             highscore = p.score if p.score > p.highscore else p.highscore,
         )
@@ -322,7 +323,7 @@ async def on_restart(bot: Client, interaction: Interaction):
 
         await reset_p.save(conn)
     except Exception as e:
-        await interaction.respond("An error occurred!", ephemeral=True)
+        await ctx.respond("An error occurred!", ephemeral=True)
         logger.error(e)
         throw_error = True
     finally:
@@ -331,16 +332,11 @@ async def on_restart(bot: Client, interaction: Interaction):
     if throw_error:
         return
     
-    embed = build_game_embed(event, reset_p)
+    embed = build_game_embed(ctx, reset_p)
 
     row = build_player_options(reset_p)
 
-    await interaction.update(
-        MessagePart(
-            embeds=[embed],
-            components=[row]
-        )
-    )
+    await ctx.update(embeds=[embed], components=[row])
 
 wrap_help_field = lambda name, values: EmbedField('{acorn} ' + name, '\n'.join(['{space}{bullet}' + v for v in values]))
 
@@ -377,10 +373,24 @@ GAME_HELP = {
 
 GAME_HELP_SIZE = len(GAME_HELP)
 
-def build_help_message(event: InteractionEvent, page_num: int):
-    acorn = bot_emojis.get_emoji('acorn').mention
-    space = bot_emojis.get_emoji('space').mention
-    bullet = bot_emojis.get_emoji('bullet').mention
+def build_button(cond: bool, custom_id: str, emoji: str):
+    button = Button(
+        custom_id=custom_id,
+        emoji=EmojiModel(emoji)
+    )
+
+    if not cond:
+        button.style = ButtonStyle.PRIMARY
+    else:    
+        button.style = ButtonStyle.SECONDARY
+        button.disabled = True
+
+    return button
+
+def build_help_message(ctx: InteractionContext, page_num: int):
+    acorn = app_emojis.get_emoji('acorn').mention
+    space = app_emojis.get_emoji('space').mention
+    bullet = app_emojis.get_emoji('bullet').mention
 
     help_field = GAME_HELP.get(page_num)
 
@@ -390,72 +400,60 @@ def build_help_message(event: InteractionEvent, page_num: int):
     help_field.name = help_field.name.format(acorn=acorn)
     help_field.value = help_field.value.format(space=space, bullet=bullet)
 
-    embed = EmbedPart(
+    embed = Embed(
         title='Help Pages',
-        author=E.user_author(event.member.user),
         fields=[help_field],
         footer=EmbedFooter(f"Page {page_num +1} of {GAME_HELP_SIZE}")
     )
+    embed.set_user_author(ctx.user)
 
-    page_buttons = A.row([
-        A.secondary(custom_id=f"help start_{event.member.user.id}_0", emoji='⏮️', disabled=True)
-        if page_num == 0 else
-        A.primary(custom_id=f"help start_{event.member.user.id}_0", emoji='⏮️'),
+    first = build_button(page_num == 0, f"help start_{ctx.user.id}_0", '⏮️')
 
-        A.secondary(custom_id=f"help back_{event.member.user.id}_{page_num -1}", emoji='⏪', disabled=True)
-        if page_num -1 < 0 else
-        A.primary(custom_id=f"help back_{event.member.user.id}_{page_num -1}", emoji='⏪'),
+    previous = build_button(page_num -1 < 0, f"help back_{ctx.user.id}_{page_num -1}", '⏪')
 
-        A.secondary(custom_id=f"help next_{event.member.user.id}_{page_num +1}", emoji='⏩', disabled=True)
-        if page_num +1 == GAME_HELP_SIZE else
-        A.primary(custom_id=f"help next_{event.member.user.id}_{page_num +1}", emoji='⏩'),
+    next = build_button(page_num +1 == GAME_HELP_SIZE, f"help next_{ctx.user.id}_{page_num +1}", '⏩')
 
-        A.secondary(custom_id=f"help end_{event.member.user.id}_{GAME_HELP_SIZE -1}", emoji='⏭️', disabled=True)
-        if page_num == GAME_HELP_SIZE -1 else
-        A.primary(custom_id=f"help end_{event.member.user.id}_{GAME_HELP_SIZE -1}", emoji='⏭️')
-    ])
+    last = build_button(page_num == GAME_HELP_SIZE -1, f"help end_{ctx.user.id}_{GAME_HELP_SIZE -1}", '⏭️')
+
+    row = ActionRow([first, previous, next, last])
 
     return MessagePart(
         embeds=[embed],
-        components=[page_buttons]
+        components=[row]
     )
 
 @commands.slash_command('help', 'Need some assistance?', guild_ids=GUILD_ID if IS_BETA else None)
-async def on_help(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
+async def on_help(ctx: ApplicationCommandContext):
+    await ctx.respond(build_help_message(ctx, 0))
 
-    await interaction.respond(build_help_message(event, 0))
+async def respond_help(ctx: MessageComponentContext):
+    _, user_id, page_num = ctx.data.custom_id.split('_')
 
-async def respond_help(interaction: Interaction):
-    event: InteractionEvent = interaction.context
-
-    _, user_id, page_num = event.data.custom_id.split('_')
-
-    if int(user_id) != event.member.user.id:
-        await interaction.respond("This message belongs to someone else! Send `/help` to initiate your own help pages.", ephemeral=True)
+    if int(user_id) != ctx.user.id:
+        await ctx.respond("This message belongs to someone else! Send `/help` to initiate your own help pages.", ephemeral=True)
         return
 
-    await interaction.update(build_help_message(event, int(page_num)))
+    msg = build_help_message(ctx, int(page_num))
+    await ctx.update(embeds=msg.embeds, components=msg.components)
 
 @components.button('help start_*_0')
-async def on_to_start(bot: Client, interaction: Interaction):
-    await respond_help(interaction)
+async def on_to_start(ctx: MessageComponentContext):
+    await respond_help(ctx)
 
 @components.button('help back_*')
-async def on_back_page(bot: Client, interaction: Interaction):
-    await respond_help(interaction)
+async def on_back_page(ctx: MessageComponentContext):
+    await respond_help(ctx)
 
 @components.button('help next_*')
-async def on_next_page(bot: Client, interaction: Interaction):
-    await respond_help(interaction)
+async def on_next_page(ctx: MessageComponentContext):
+    await respond_help(ctx)
 
 @components.button(f"help end_*_{GAME_HELP_SIZE -1}")
-async def on_to_end(bot: Client, interaction: Interaction):
-    await respond_help(interaction)
+async def on_to_end(ctx: MessageComponentContext):
+    await respond_help(ctx)
 
-@commands.slash_command('leaderboard', 'Check out the biggest hoarders around!', guild_ids=GUILD_ID if IS_BETA else None)
-async def on_leaderboard(bot: Client, interaction: Interaction):
-    event: InteractionEvent = interaction.context
+@commands.slash_command('leaderboard', 'Check out the biggest hoarders around!', guild_ids=[GUILD_ID] if IS_BETA else None)
+async def on_leaderboard(ctx: ApplicationCommandContext):
 
     conn = await db.get_connection()
     footer = EmbedFooter('⭐ Your Rank: Unranked | Global Rank: Unranked')
@@ -463,20 +461,20 @@ async def on_leaderboard(bot: Client, interaction: Interaction):
     try:
         leaderboard = Leaderboard()
 
-        entries = await leaderboard.fetch(conn, event.guild_id)
+        entries = await leaderboard.fetch(conn, ctx.event.guild_id)
 
         if not entries:
-            await interaction.respond("No records could be found! Please try again later.", ephemeral=True)
+            await ctx.respond("No records could be found! Please try again later.", ephemeral=True)
             await conn.close()
             return
         
-        is_player = await Player(event.member.user.id).fetch(conn, False)
+        is_player = await Player(ctx.user.id).fetch(conn, False)
 
         if is_player:
-            global_player = await leaderboard.fetch_global_player(conn, event.member.user.id)
+            global_player = await leaderboard.fetch_global_player(conn, ctx.user.id)
 
             if global_player:
-                local_player = await leaderboard.fetch_local_player(conn, event.guild_id, event.member.user.id)
+                local_player = await leaderboard.fetch_local_player(conn, ctx.event.guild_id, ctx.user.id)
 
                 if not local_player:
                     footer = EmbedFooter(
@@ -487,7 +485,7 @@ async def on_leaderboard(bot: Client, interaction: Interaction):
                         f'⭐ Your Rank: #{local_player.rank} | Global Rank: #{global_player.rank}'
                     )
 
-        space = bot_emojis.get_emoji('space').mention
+        space = app_emojis.get_emoji('space').mention
 
         fmt_entries = '\n'.join([
             f"{space} **{e.rank}.**  <@{e.user_id}> - **{e.best_score}**"
@@ -497,13 +495,13 @@ async def on_leaderboard(bot: Client, interaction: Interaction):
     finally:
         await conn.close()
 
-    embed = EmbedPart(
+    embed = Embed(
         title='Leaderboard',
         thumbnail=EmbedThumbnail('https://raw.githubusercontent.com/scurry-works/squirrel-stash/refs/heads/main/assets/bookie.png'),
         description=fmt_entries,
         footer=footer
     )
 
-    await interaction.respond(MessagePart(embeds=[embed]))
+    await ctx.respond(MessagePart(embeds=[embed]))
 
 client.run()
